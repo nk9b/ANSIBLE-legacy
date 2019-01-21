@@ -1,0 +1,147 @@
+---
+# Gather IOS-specific facts about the device. Here, we're pulling all
+# fact sets except for interface information.
+
+- name: Gathering 6504E IOS facts...
+  ios_facts:
+    gather_subset: "!interfaces"
+
+# Determine the currently running IOS image from the ansible_net_image
+# fact. Filter the fact to the .bin filename format.
+
+- name: Registering currently running 6504E IOS image...
+  shell: echo {{ ansible_net_image }} | grep -Po '(?<=:).*?(bin)'
+  register: running_image
+- debug: msg="{{ running_image.stdout }}"
+
+# Determine whether the IOS was installed as an archive or simple binary.
+# Filter the full ansible_net_image fact into the base directory name. If
+# no directories are present, move to the next task.
+
+- name: Checking for image archive or binary installation...
+  shell: echo {{ running_image.stdout }} | grep -Po '.*(?=\/)'
+  register: archive_dir
+  failed_when: "archive_dir.rc == 2"
+- debug: msg="{{ archive_dir }}"
+
+# Save the current running-config for backout purposes. Wait until the
+# device returns 'bytes copied', signalling a successful configuration save.
+
+- name: Save current configuration to pre-upgrade configuration
+  ios_command:
+    commands:
+      - "copy running-config running-before-upgrade\n\n"
+    wait_for:
+      - "result[0] contains 'bytes copied'"
+  register: save_current_to_pre_upgrade
+
+# Load up all files/directories into an Ansible data structure.
+
+- name: Listing and registering all files in 6504E filesystem...
+  ios_command:
+    commands:
+      - dir
+  register: file_listing
+
+# Discover all IOS binaries and register. Filter the running_image fact
+# with a regex; if there are no .bin files (return code = 2), move to next
+# task. This task relies on the standard naming structure of the binary
+# (e.g. s2t54-adventerprisek9...), and we key from the first 5 characters of the
+# filename. If the IOS was installed as an archive, it's possible that there
+# may be no binaries in the / directory. If no root binaries, move to next
+# task.
+
+- name: Locating all 6504E IOS binaries present...
+  shell: btrimg=`echo {{ running_image.stdout }} | grep -Po '^[a-zA-Z0-9]{5}'`; echo {{ file_listing.stdout }} | grep -Po ''$btrimg'.*?(bin)'
+  register: ios_binaries
+  failed_when: "ios_binaries.rc == 2"
+- debug: msg="{{ ios_binaries.stdout_lines }}"
+
+# To free up filesystem space, delete all binaries except the current
+# running image. The binary to be deleted is compared to the filtered
+# running_image fact.
+
+- name: Deleting all 6504E IOS binaries except currently running image...
+  ios_command:
+    provider: "{{ cli }}"
+    commands:
+      - "delete {{ item }}\n\n"
+  with_items: "{{ ios_binaries.stdout_lines }}"
+  when: item != running_image.stdout
+  register: ios_binaries_del
+- debug: msg="{{ ios_binaries_del.results | map(attribute='stdout') | list }}"
+
+# Discover all IOS directories and register. The logic is similar to
+# binary file discovery. If no directories are found, move to next task.
+
+- name: Locating all 6504E IOS directories...
+  shell: echo {{ file_listing.stdout }} | grep 'drw-' | awk '{ print $9 }'
+  register: ios_directories
+  failed_when: "ios_directories.rc == 2"
+- debug: msg="{{ ios_directories.stdout_lines }}"
+
+# To free up filesystem space, delete all directories except the current
+# running image. The directory to be deleted is compared to the registered
+# archive directory.
+
+- name: Deleting all 6504E IOS directories except archive directory...
+  ios_command:
+    provider: "{{ cli }}"
+    commands:
+      - "delete /force /recursive {{ item }}\n\n"
+  with_items: "{{ ios_directories.stdout_lines }}"
+  when: item != archive_dir.stdout
+  register: ios_directories_del
+  failed_when: "ios_directories.rc == 2"
+
+# Upload the new binary to the device. Wait until the device returns an
+# "OK", signalling a complete transfer.
+
+- name: Copying new image to filesystem...
+  ios_command:
+    provider: "{{ cli }}"
+    commands:
+      - "copy ftp://anonymous:test@1.2.3.4/6500/{{ ios_img_6504E }} bootdisk:\n\n"
+    wait_for:
+      - "result[0] contains 'OK'"
+  when: running_image.stdout != ios_img_6504E
+  register: ios_img_copy
+- debug: msg="{{ ios_img_copy }}"
+
+# An additional MD5 checksum safety check is performed. Wait until the device
+# returns "Done!", signalling a good checksum calculation.
+
+- name: Verifying MD5 hash of new image...
+  ios_command:
+    provider: "{{ cli }}"
+    commands:
+      - "verify /md5 bootdisk:/{{ ios_img_6504E }}"
+    wait_for:
+      - "result[0] contains 'Done!'"
+  register: ios_img_md5
+- debug: msg="{{ ios_img_md5.stdout_lines }}"
+
+# Update the device boot variable and perform other housekeeping tasks
+# unique to the environment or policy. Auto save the steps in this task.
+
+- name: Update boot variable and other misc. items...
+  ios_config:
+    provider: "{{ cli }}"
+    save: yes
+    lines:
+      - no boot system
+      - "boot system bootdisk:/{{ ios_img_6504E }}"
+      - clock timezone CST -6 0
+      - clock summer-time CDT recurring
+      - ntp server 1.2.3.4
+      - ntp server 5.6.7.8
+  register: set_time_items
+
+# Reload with confidence! At this point, we have received two notifications
+# of a proper image install.
+
+- name: Reload device at 20:00
+  ios_command:
+    commands: "reload at 20:00\n\n"
+  register: reload_status
+- debug: msg="{{ reload_status.stdout }}"

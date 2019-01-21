@@ -1,0 +1,23 @@
+---
+hostname: "your_hostname"
+
+vlans:
+  - id: "vlan id"
+    name: "vlan_name"
+    svi: dhcp hostname "your_hostname"
+
+port_channels:
+  1:
+   FastEthernet1/0:
+     - - 48
+       - 48
+
+access_ports:
+  341:
+    FastEthernet1/0:
+      - - 1
+        - 47
+# Add additional modules for switch stacks...
+#    GigabitEthernet1:
+#      - - 0
+#        - 48

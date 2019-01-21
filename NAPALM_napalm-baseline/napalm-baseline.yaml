@@ -1,0 +1,38 @@
+---
+- name: NAPALM for Cisco IOS
+  hosts: [hosts]
+  serial: 5
+  gather_facts: no
+  connection: local
+  vars:
+    cli:
+      host: "{{ ansible_host }}"
+      username: "{{ ansible_ssh_user }}"
+      password: "{{ ansible_ssh_pass }}"
+      timeout: 600
+
+  tasks:
+
+    - name: Gather NAPALM Facts
+      napalm_get_facts:
+          hostname: "{{ ansible_host }}"
+          username: "{{ ansible_ssh_user }}"
+          password: "{{ ansible_ssh_pass }}"
+          dev_os: "{{ dev_os }}"
+      register: napalm_facts
+    - debug: msg="{{ napalm_facts }}"
+
+    - name: Write out device configuration...
+      napalm_install_config:
+          hostname: "{{ ansible_host }}"
+          username: "{{ ansible_ssh_user }}"
+          password: "{{ ansible_ssh_pass }}"
+          dev_os: "{{ dev_os }}"
+          config_file: /etc/ansible/CONFIGS/{{ ansible_host }}.txt
+          commit_changes: True
+          replace_config: True
+          get_diffs: True
+#          optional_args: auto_rollback_on_error=False
+          diff_file: /etc/ansible/CONFIGS/{{ ansible_host }}.diff
+      register: napalm_config
+    - debug: msg={{ napalm_config }}

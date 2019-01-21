@@ -1,0 +1,21 @@
+---
+- name: Update Cisco IOS device images
+  hosts: [hosts]
+  serial: 5
+  gather_facts: no
+  connection: local
+  vars:
+    cli:
+      host: "{{ ansible_host }}"
+      username: "{{ ansible_ssh_user }}"
+      password: "{{ ansible_ssh_pass }}"
+      timeout: 600
+
+    ios_img_6504E: "image.bin"
+    snmp_community: "snmp-community"
+
+  tasks:
+
+    - name: Executing 6504E platform task list...
+      include: 6504E.yaml
+      when: "'6504E' in group_names"

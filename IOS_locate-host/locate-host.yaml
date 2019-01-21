@@ -1,0 +1,74 @@
+---
+- name: Locate host endpoints and display connection characteristics
+  hosts: [hosts]
+  serial: 5
+  gather_facts: no
+  connection: local
+  vars:
+    cli:
+      host: "{{ ansible_host }}"
+      username: "{{ ansible_ssh_user }}"
+      password: "{{ ansible_ssh_pass }}"
+      timeout: 600
+
+  tasks:
+
+    - file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - /etc/ansible/lab/{{ ansible_host }}.cam.out
+        - /etc/ansible/lab/{{ ansible_host }}.arp.out
+
+    - name: Discovering CAM table...
+      ios_command:
+        provider: "{{ cli }}"
+        commands:
+          - show mac address-table | inc DYNAMIC
+      register: cam_table
+    - debug: msg="{{ cam_table.stdout_lines }}"
+
+    - name: Discovering default gateway/L3 interface...
+      ios_command:
+        provider: "{{ cli }}"
+        commands:
+          - show ip default-gateway
+      register: default_gateway
+    - debug: msg="{{ default_gateway.stdout }}"
+
+    - name: Filter and write CAM table information...
+      shell: echo {{ item }} | awk '{ print "VLAN{{ ":" }} "$1,"  MAC{{ ":" }} "$2,"  Interface{{ ":" }} "$4,"  IP{{ ":" }}" }' >> /etc/ansible/lab/{{ ansible_host }}.cam.out
+      with_items: "{{ cam_table.stdout_lines }}"
+      register: cam_filter_results
+    - debug: msg="{{ cam_filter_results.results | map(attribute='stdout') | list }}"
+
+    - name: Parsing MAC addresses from CAM table...
+      shell: awk '{ print $4 }' < /etc/ansible/lab/{{ ansible_host }}.cam.out
+      register: mac_address
+    - debug: msg="{{ mac_address.stdout_lines }}"
+
+    - name: Discovering ARP/MAC mappings...
+      ios_command:
+        host: "{{ default_gateway.stdout | list | join('.') }}"
+        username: "{{ ansible_ssh_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        commands:
+          - show ip arp | inc {{ item }}
+      with_items: "{{ mac_address.stdout_lines }}"
+      register: arp_mac_results
+    - debug: msg="{{ arp_mac_results.results | map(attribute='stdout_lines') | list }}"
+
+    - name: Writing ARP/MAC mappings...
+      shell: echo {{ item }} | awk '{ print $2,"  "$4 }' >> /etc/ansible/lab {{ ansible_host }}.arp.out
+      no_log: True
+      with_items: "{{ arp_mac_results.results | map(attribute='stdout_lines') | list }}"
+
+    - name: Displaying Layer 3 Endpoint Mappings...
+      shell: join --nocheck-order -1 4 -2 2 -o 1.1,1.2,1.3,1.4,1.5,1.6,1.7,2.1 /etc/ansible/lab/{{ ansible_host }}.cam.out /etc/ansible/lab/{{ ansible_host }}.arp.out
+      register: l3_mappings
+    - debug: msg="{{ l3_mappings.stdout_lines }}"
+
+    - name: Displaying Layer 2 Endpoint Mappings...
+      shell: mac=`cat /etc/ansible/lab/{{ ansible_host }}.cam.out | awk '{ print $4 }'`; arp=`cat /etc/ansible/lab/{{ ansible_host }}.arp.out | grep "$mac" | awk '{ print $2 }'`; cat /etc/ansible/lab/{{ ansible_host }}.cam.out | grep -v "$arp"
+      register: l2_mappings
+    - debug: msg="{{ l2_mappings.stdout_lines }}"

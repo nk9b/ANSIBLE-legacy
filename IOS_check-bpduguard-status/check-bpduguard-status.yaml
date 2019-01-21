@@ -1,0 +1,60 @@
+---
+- name: Detecting Spanning Tree/BPDUGuard loops...
+  hosts: [hosts]
+  serial: 5
+  gather_facts: no
+  connection: local
+  vars:
+    cli:
+      timeout: 30
+
+  tasks:
+
+    - name: Locating interfaces currently error-disabled due to bpduguard...
+      ios_command:
+        provider: "{{ cli }}"
+        commands:
+          - show interface status err-disabled
+      register: err_disabled_ports
+    - debug: msg={{ err_disabled_ports.stdout_lines }}
+
+    - name: Updating status of interfaces currently disabled...
+      shell: echo {{ err_disabled_ports.stdout_lines }} | sed 's/, u/\n/g' | grep -Po '.*bpduguard' | awk '{ print $1 }'
+      register: disabled_ports
+    - fail: msg="*** NO PORTS ERROR DISABLED ***"
+      failed_when: disabled_ports.stdout_lines == []
+    - debug: msg={{ disabled_ports }}
+
+    - name: Shutting blocked interfaces and updating their descriptions...
+      ios_config:
+        provider: "{{ cli }}"
+        parents: "interface {{ item }}"
+        lines:
+          - description *** LOOPED INTERFACE  ***
+          - shut
+      with_items: "{{ disabled_ports.stdout_lines }}"
+      register: interface_update
+#    - debug: msg={{ interface_update }}
+
+    - name: Gathering device log entries...
+      ios_command:
+        provider: "{{ cli }}"
+        commands:
+          - show logging
+      register: device_log
+#    - debug: msg={{ device_log.stdout_lines }}
+
+    - name: Parsing today's log entries for interface flap statistics...
+      shell: month=`date | awk '{ print $2 }'`; day=`date | awk '{ print $3 }'`; echo {{ device_log.stdout_lines }} | sed 's/, u/\n/g' | grep -Po ''$month' *'$day'\b.*' | grep -Po '.*%PM-4-ERR_RECOVER.*' | grep -Po '.*{{ item }}' | wc -l
+      with_items: "{{ disabled_ports.stdout_lines }}"
+      register: todays_entries
+#    - debug: msg="{{ todays_entries.results | map(attribute='item') | list }}"
+    - debug: msg="{{ todays_entries.results | map(attribute='stdout') | list }}"
+    - name: Mailing device status to network engineering staff...
+      mail:
+        host: smtp.domain.com
+        port: 25
+        to: User <user@company.com>
+        from: root@host (Ansible/Git Source Control)
+        subject: "Looped Device Status for Host: {{ ansible_host }}"
+        body: "Interface(s): \n{{ todays_entries.results | map(attribute='item') | list | to_nice_yaml }}\nRespective flap counts for today: \n{{ todays_entries.results | map(attribute='stdout') | list | to_nice_yaml }}\nThe above ports have been administratively shutdown, and interface descriptions tagged as LOOPED."

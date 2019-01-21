@@ -1,0 +1,4 @@
+---
+- name: Generate 3750X configuration files
+  template: src=3750X.j2 dest=/etc/ansible/CONFIGS/{{ ansible_host }}.txt
+  with_items: "{{ access_ports }}"

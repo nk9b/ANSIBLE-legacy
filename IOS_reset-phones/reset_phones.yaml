@@ -1,0 +1,52 @@
+---
+- name: Power-cycle IP Phones on access switch
+  hosts: [hosts]
+  strategy: free
+  serial: 5
+  gather_facts: no
+  connection: local
+  vars:
+    cli:
+      host: "{{ ansible_host }}"
+      username: "{{ ansible_ssh_user }}"
+      password: "{{ ansible_ssh_pass }}"
+      timeout: 30
+
+  tasks:
+
+    - name: Discovering connected phones via CDP...
+      ios_command:
+        provider: "{{ cli }}"
+        commands:
+          - show cdp neighbors | inc Phone
+      register: phone_interfaces
+#    - debug: msg="{{ phone_interfaces.stdout_lines }}"
+
+    - name: Parsing phone interfaces...
+      shell: echo {{ phone_interfaces.stdout_lines }} | sed 's/, u/\n/g' | grep "IP Phone" | awk '{ print $2$3 }'
+      register: parsed_phone_interfaces
+    - fail: msg="*** NO PHONES ATTACHED ***"
+      failed_when: parsed_phone_interfaces.stdout_lines == []
+    - debug: msg="{{ parsed_phone_interfaces.stdout_lines }}"
+
+    - include_role:
+        name: switch
+      with_items: "{{ parsed_phone_interfaces.stdout_lines }}"
+      vars:
+        phone_interface: "{{ item }}"
+      async: 1000
+      poll: 0
+
+    - name: Power-cycling phone interfaces...
+      ios_config:
+        provider: "{{ cli }}"
+        parents: "interface {{ item }}"
+        lines:
+          - shut
+          - no shut
+        save_when: modified
+      with_items: "{{ parsed_phone_interfaces.stdout_lines }}"
+      register: reset_interfaces
+      async: 30
+      poll: 0
+    - debug: msg="{{ reset_interfaces }}"

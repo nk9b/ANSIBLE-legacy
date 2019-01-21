@@ -1,0 +1,62 @@
+version (IOS configuration version)
+!
+{% for vlan in vlans %}
+vlan {{ vlan.id }}
+ name {{ vlan.name }}
+interface Vlan{{ vlan.id }}
+ ip address {{ vlan.svi }}
+{% endfor %}
+{# Uncomment the generator stanzas as appropriate #}
+{# {% for group in port_channels %} #}
+{# {% for sw_module in port_channels[group] %} #}
+{# {% for int_range in port_channels[group][sw_module] %} #}
+{# {% for x in range(int_range[0],int_range[1]) %} #}
+{# interface {{ sw_module }}/{{ x }} #}
+{# switchport trunk encaps dot1q #}
+{# switchport mode trunk #}
+{# channel-group {{ group }} #}
+{# {% endfor %} #}
+{# {% endfor %} #}
+{# {% endfor %} #}
+{# {% endfor %} #}
+{# {% for port_vlan in access_ports %} #}
+{# {% for sw_module in access_ports[port_vlan] %} #}
+{# {% for int_range in access_ports[port_vlan][sw_module] %} #}
+{# {% for x in range(int_range[0],int_range[1]+1) %} #}
+interface {{ sw_module }}/{{ x }}
+ description EDGE_IF_VLAN_{{ port_vlan }}
+ switchport mode access
+ switchport access vlan {{ port_vlan }}
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+{% if port_vlan == 123 %}
+ switchport voice vlan 20
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endfor %}
+{% endfor %}
+!
+hostname {{ hostname }}
+!
+archive
+ path flash:archive
+ write-memory
+!
+aaa new-model
+!
+aaa authentication login default group tacacs+ local
+aaa authorization console
+aaa authorization config-commands
+{# Due to a Cisco IOS bug, add TAB after "local" #}
+aaa authorization exec default group tacacs+ local	
+{# Due to a Cisco IOS bug, add TAB after "local" #}
+aaa authorization commands 15 default group tacacs+ local	
+{# Due to a Cisco IOS bug, add TAB after "local" #}
+aaa authorization network default group tacacs+ local	
+aaa accounting exec default start-stop group tacacs+
+aaa accounting commands 15 default start-stop group tacacs+
+aaa accounting network default start-stop group tacacs+
+!
+*** REMAINING CONFIGURATION LINES ***
+end

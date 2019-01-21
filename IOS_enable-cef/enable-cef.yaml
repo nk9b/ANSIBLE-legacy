@@ -1,0 +1,46 @@
+---
+- name: Update Cisco IOS device images
+  hosts: [hosts]
+  serial: 5
+  gather_facts: no
+  connection: local
+  vars:
+    cli:
+      host: "{{ ansible_host }}"
+      username: "{{ ansible_ssh_user }}"
+      password: "{{ ansible_ssh_pass }}"
+      timeout: 600
+
+    snmp_community: "snmp-community"
+
+  tasks:
+
+  - name: Gathering IOS facts...
+    ios_facts:
+      gather_subset: "interfaces"
+
+  - name: Discovering running interface configuration...
+    ios_command:
+      provider: "{{ cli }}"
+      commands:
+        - show run interface {{ item.key }}
+    with_dict: "{{ ansible_net_interfaces }}"
+    register: running_if_config
+  - debug: msg="{{ running_if_config.results | map(attribute='stdout') | list }}"
+
+  - name: Checking for interfaces in non-CEF switching mode...
+    shell: echo "{{ running_if_config.results | map(attribute='stdout') | list }}" | awk '/interface/,/end/' | awk -v RS="end" '/no ip route-cache/' | sed 's/\\n/ /g' | awk '/interface/,/interface/{print $11}'
+    register: no_cef_if
+  - fail: msg="*** NO INTERFACES ARE CEF-DISABLED ***"
+    failed_when: no_cef_if.stdout_lines == []
+  - debug: msg="{{ no_cef_if.stdout_lines }}"
+
+  - name: Enabling CEF-switching mode on non-CEF interfaces...
+    ios_config:
+      save_when: modified
+      parents: "interface {{ item }}"
+      lines:
+        - ip route-cache cef
+    with_items: "{{ no_cef_if.stdout_lines }}"
+    register: updated_ifs
+  - debug: msg="{{ updated_ifs }}"
