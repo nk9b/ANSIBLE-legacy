@@ -1,5 +1,5 @@
 ---
-- name: Update Cisco IOS device images
+- name: Enable CEF on all L3 interfaces
   hosts: [hosts]
   serial: 5
   gather_facts: no
